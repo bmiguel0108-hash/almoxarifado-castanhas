@@ -99,7 +99,7 @@
     <div id="status"></div>
   </div>
 
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="html5-qrcode.min.js" defer></script>
   <script>
     // ATENÇÃO: troque pela URL do seu Apps Script (a mesma do link /exec que você já usa)
     const API_URL = 'https://script.google.com/macros/s/AKfycbyUzoP_1uugrMM1xRevzTKuTCV-a3Sacpa3jfMkip_Xgpqn8HQGbYWBP1WEzkUXTgMm/exec';
@@ -122,24 +122,46 @@
     }
 
     async function carregarProdutos() {
+      const select = document.getElementById('produto');
+
+      // 1) Mostra imediatamente o que já tinha salvo no celular (rápido, sem esperar o Google)
+      const cache = localStorage.getItem('produtosCache');
+      if (cache) {
+        try {
+          produtos = JSON.parse(cache);
+          preencherSelectProdutos();
+        } catch (e) { /* cache inválido, ignora */ }
+      } else {
+        select.innerHTML = '<option value="">Carregando produtos...</option>';
+      }
+
+      // 2) Busca a versão atual no Google por trás dos panos e atualiza quando chegar
       try {
-        produtos = await callApi('getProdutos');
-        const select = document.getElementById('produto');
-        select.innerHTML = '<option value="">Selecione...</option>';
-        produtos.forEach(function (p) {
-          const opt = document.createElement('option');
-          opt.value = p.produto;
-          opt.textContent = p.produto + ' (' + p.unidade + ')';
-          select.appendChild(opt);
-        });
+        const listaAtual = await callApi('getProdutos');
+        produtos = listaAtual;
+        localStorage.setItem('produtosCache', JSON.stringify(listaAtual));
+        preencherSelectProdutos();
       } catch (err) {
-        mostrarStatus('erro', 'Não foi possível carregar produtos: ' + err.message);
+        if (!cache) mostrarStatus('erro', 'Não foi possível carregar produtos: ' + err.message);
       }
 
       try {
         const nome = await callApi('getUltimoResponsavel');
         if (nome) document.getElementById('responsavel').value = nome;
       } catch (err) { /* não crítico */ }
+    }
+
+    function preencherSelectProdutos() {
+      const select = document.getElementById('produto');
+      const selecionadoAntes = select.value;
+      select.innerHTML = '<option value="">Selecione...</option>';
+      produtos.forEach(function (p) {
+        const opt = document.createElement('option');
+        opt.value = p.produto;
+        opt.textContent = p.produto + ' (' + p.unidade + ')';
+        select.appendChild(opt);
+      });
+      if (selecionadoAntes) select.value = selecionadoAntes;
     }
 
     function selecionarTipo(tipo) {
