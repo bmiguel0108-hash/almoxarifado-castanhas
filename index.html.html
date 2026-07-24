@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Almoxarifado - lançamento rápido</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 16px;
+    background: #F1EFE8;
+    color: #2C2C2A;
+  }
+  h1 { font-size: 18px; margin: 0 0 16px; }
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  label { display: block; font-size: 13px; font-weight: bold; margin-bottom: 6px; color: #5F5E5A; }
+  input, select {
+    width: 100%; padding: 12px; font-size: 16px;
+    border: 1px solid #B4B2A9; border-radius: 8px; margin-bottom: 14px; background: #fff;
+  }
+  #qr-reader { width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+  button {
+    width: 100%; padding: 14px; font-size: 16px; font-weight: bold;
+    border: none; border-radius: 8px; cursor: pointer; margin-bottom: 10px;
+  }
+  #btn-scan { background: #185FA5; color: #fff; }
+  #btn-enviar { background: #3B6D11; color: #fff; }
+  .tipo-group { display: flex; gap: 10px; margin-bottom: 14px; }
+  .tipo-btn {
+    flex: 1; padding: 14px; text-align: center; border-radius: 8px;
+    border: 2px solid #B4B2A9; font-weight: bold; cursor: pointer; background: #fff;
+  }
+  .tipo-btn.selecionado.entrada { background: #EAF3DE; border-color: #639922; color: #27500A; }
+  .tipo-btn.selecionado.saida { background: #FAECE7; border-color: #D85A30; color: #712B13; }
+  #produto-lido {
+    font-size: 14px; padding: 10px; border-radius: 8px; background: #E6F1FB;
+    color: #0C447C; margin-bottom: 10px; display: none;
+  }
+  #status { text-align: center; font-size: 14px; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; }
+  #status.ok { background: #EAF3DE; color: #27500A; display: block; }
+  #status.erro { background: #FCEBEB; color: #791F1F; display: block; }
+</style>
+</head>
+<body>
+  <h1>Almoxarifado - lançamento rápido</h1>
+
+  <div class="card">
+    <button id="btn-scan" type="button">Escanear QR code</button>
+    <div id="qr-reader"></div>
+    <div id="produto-lido"></div>
+
+    <label for="produto">Produto</label>
+    <select id="produto"></select>
+
+    <div id="toggle-cadastro" style="color:#185FA5; font-size:13px; font-weight:bold; margin:-6px 0 14px; cursor:pointer;">+ Cadastrar novo produto</div>
+
+    <div id="grupo-cadastro" class="card" style="display:none; padding:12px; margin-bottom:14px; background:#F7F6F1;">
+      <label for="novo-codigo">Código (opcional)</label>
+      <input type="text" id="novo-codigo">
+      <label for="novo-produto">Nome do produto</label>
+      <input type="text" id="novo-produto">
+      <label for="novo-unidade">Unidade</label>
+      <input type="text" id="novo-unidade" placeholder="Ex: UNIDADE, CAIXA, LITRO">
+      <label for="novo-estoque">Estoque inicial</label>
+      <input type="number" id="novo-estoque" min="0" step="1" value="0">
+      <button type="button" id="btn-salvar-produto" style="background:#5F5E5A; color:#fff;">Salvar produto</button>
+      <div id="status-cadastro" style="font-size:13px; text-align:center;"></div>
+    </div>
+
+    <label>Tipo de movimentação</label>
+    <div class="tipo-group">
+      <div class="tipo-btn entrada" id="btn-entrada">Entrada</div>
+      <div class="tipo-btn saida" id="btn-saida">Saída</div>
+    </div>
+
+    <label for="quantidade">Quantidade</label>
+    <input type="number" id="quantidade" min="0" step="1" inputmode="numeric">
+
+    <label for="responsavel">Responsável</label>
+    <input type="text" id="responsavel" placeholder="Seu nome">
+
+    <div id="grupo-destinatario" style="display:none;">
+      <label for="destinatario">Entregar para</label>
+      <input type="text" id="destinatario" placeholder="Nome ou setor de quem vai receber">
+    </div>
+
+    <label for="observacao">Observação (opcional)</label>
+    <input type="text" id="observacao">
+
+    <button id="btn-enviar" type="button">Registrar</button>
+    <div id="status"></div>
+  </div>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script>
+    // ATENÇÃO: troque pela URL do seu Apps Script (a mesma do link /exec que você já usa)
+    const API_URL = 'https://script.google.com/macros/s/AKfycbyUzoP_1uugrMM1xRevzTKuTCV-a3Sacpa3jfMkip_Xgpqn8HQGbYWBP1WEzkUXTgMm/exec';
+
+    let produtos = [];
+    let tipoSelecionado = null;
+    let scanner = null;
+    let scannerAtivo = false;
+
+    // Content-Type text/plain evita o "preflight" de CORS que o Apps Script não responde bem.
+    async function callApi(action, payload) {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: action, payload: payload })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return data.result;
+    }
+
+    async function carregarProdutos() {
+      try {
+        produtos = await callApi('getProdutos');
+        const select = document.getElementById('produto');
+        select.innerHTML = '<option value="">Selecione...</option>';
+        produtos.forEach(function (p) {
+          const opt = document.createElement('option');
+          opt.value = p.produto;
+          opt.textContent = p.produto + ' (' + p.unidade + ')';
+          select.appendChild(opt);
+        });
+      } catch (err) {
+        mostrarStatus('erro', 'Não foi possível carregar produtos: ' + err.message);
+      }
+
+      try {
+        const nome = await callApi('getUltimoResponsavel');
+        if (nome) document.getElementById('responsavel').value = nome;
+      } catch (err) { /* não crítico */ }
+    }
+
+    function selecionarTipo(tipo) {
+      tipoSelecionado = tipo;
+      document.getElementById('btn-entrada').classList.toggle('selecionado', tipo === 'Entrada');
+      document.getElementById('btn-saida').classList.toggle('selecionado', tipo === 'Saída');
+      document.getElementById('grupo-destinatario').style.display = (tipo === 'Saída') ? 'block' : 'none';
+      if (tipo !== 'Saída') document.getElementById('destinatario').value = '';
+    }
+    document.getElementById('btn-entrada').addEventListener('click', function () { selecionarTipo('Entrada'); });
+    document.getElementById('btn-saida').addEventListener('click', function () { selecionarTipo('Saída'); });
+
+    document.getElementById('toggle-cadastro').addEventListener('click', function () {
+      const grupo = document.getElementById('grupo-cadastro');
+      const aberto = grupo.style.display === 'block';
+      grupo.style.display = aberto ? 'none' : 'block';
+      this.textContent = aberto ? '+ Cadastrar novo produto' : '- Fechar cadastro';
+    });
+
+    document.getElementById('btn-salvar-produto').addEventListener('click', async function () {
+      const codigo = document.getElementById('novo-codigo').value;
+      const produto = document.getElementById('novo-produto').value;
+      const unidade = document.getElementById('novo-unidade').value;
+      const estoqueInicial = document.getElementById('novo-estoque').value;
+      const statusEl = document.getElementById('status-cadastro');
+
+      if (!produto) {
+        statusEl.style.color = '#791F1F';
+        statusEl.textContent = 'Informe o nome do produto.';
+        return;
+      }
+
+      statusEl.style.color = '#5F5E5A';
+      statusEl.textContent = 'Salvando...';
+
+      try {
+        await callApi('adicionarProduto', { codigo: codigo, produto: produto, unidade: unidade, estoqueInicial: estoqueInicial });
+        statusEl.style.color = '#27500A';
+        statusEl.textContent = 'Produto cadastrado! Já disponível na lista acima.';
+        document.getElementById('novo-codigo').value = '';
+        document.getElementById('novo-produto').value = '';
+        document.getElementById('novo-unidade').value = '';
+        document.getElementById('novo-estoque').value = '0';
+        carregarProdutos();
+      } catch (err) {
+        statusEl.style.color = '#791F1F';
+        statusEl.textContent = 'Erro: ' + err.message;
+      }
+    });
+
+    function onScanSuccess(codigoLido) {
+      const produto = produtos.find(function (p) { return p.codigo === codigoLido; });
+      const aviso = document.getElementById('produto-lido');
+      if (produto) {
+        document.getElementById('produto').value = produto.produto;
+        aviso.style.display = 'block';
+        aviso.textContent = 'Lido: ' + produto.produto;
+      } else {
+        aviso.style.display = 'block';
+        aviso.textContent = 'Código "' + codigoLido + '" não encontrado na lista de produtos.';
+      }
+      pararScanner();
+    }
+
+    function pararScanner() {
+      if (scanner && scannerAtivo) {
+        scanner.stop().then(function () {
+          scanner.clear();
+          scannerAtivo = false;
+        });
+      }
+    }
+
+    document.getElementById('btn-scan').addEventListener('click', function () {
+      if (scannerAtivo) { pararScanner(); return; }
+      scanner = new Html5Qrcode('qr-reader');
+      scannerAtivo = true;
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: 220 },
+        onScanSuccess
+      ).catch(function (err) {
+        mostrarStatus('erro', 'Não foi possível acessar a câmera: ' + err);
+        scannerAtivo = false;
+      });
+    });
+
+    function mostrarStatus(tipo, texto) {
+      const el = document.getElementById('status');
+      el.className = tipo;
+      el.textContent = texto;
+    }
+
+    document.getElementById('btn-enviar').addEventListener('click', async function () {
+      const produto = document.getElementById('produto').value;
+      const quantidade = document.getElementById('quantidade').value;
+      const responsavel = document.getElementById('responsavel').value;
+      const destinatario = document.getElementById('destinatario').value;
+      const observacao = document.getElementById('observacao').value;
+
+      if (!produto) { mostrarStatus('erro', 'Escolha um produto.'); return; }
+      if (!tipoSelecionado) { mostrarStatus('erro', 'Escolha Entrada ou Saída.'); return; }
+      if (!quantidade || Number(quantidade) <= 0) { mostrarStatus('erro', 'Informe a quantidade.'); return; }
+      if (!responsavel) { mostrarStatus('erro', 'Informe o responsável.'); return; }
+      if (tipoSelecionado === 'Saída' && !destinatario) { mostrarStatus('erro', 'Informe para quem o produto foi entregue.'); return; }
+
+      this.disabled = true;
+      mostrarStatus('ok', 'Enviando...');
+
+      try {
+        await callApi('registrarMovimentacao', {
+          data: new Date().toISOString(),
+          produto: produto,
+          tipo: tipoSelecionado,
+          quantidade: quantidade,
+          responsavel: responsavel,
+          destinatario: destinatario,
+          observacao: observacao
+        });
+        mostrarStatus('ok', 'Registrado: ' + tipoSelecionado + ' de ' + quantidade + ' - ' + produto);
+        document.getElementById('quantidade').value = '';
+        document.getElementById('destinatario').value = '';
+        document.getElementById('observacao').value = '';
+        document.getElementById('produto-lido').style.display = 'none';
+        callApi('salvarUltimoResponsavel', { nome: responsavel });
+      } catch (err) {
+        mostrarStatus('erro', 'Erro: ' + err.message);
+      }
+      this.disabled = false;
+    });
+
+    carregarProdutos();
+  </script>
+</body>
+</html>
