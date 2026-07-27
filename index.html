@@ -112,6 +112,11 @@
     <div id="grupo-destinatario" style="display:none;">
       <label for="destinatario">Entregar para</label>
       <input type="text" id="destinatario" placeholder="Nome ou setor de quem vai receber">
+
+      <label for="setor">Setor que consumiu</label>
+      <select id="setor">
+        <option value="">Selecione...</option>
+      </select>
     </div>
 
     <label for="observacao">Observação (opcional)</label>
@@ -149,6 +154,10 @@
       if (cache) {
         try { produtos = JSON.parse(cache); } catch (e) { /* cache inválido, ignora */ }
       }
+      const cacheSetores = localStorage.getItem('setoresCache');
+      if (cacheSetores) {
+        try { preencherSelectSetores(JSON.parse(cacheSetores)); } catch (e) { /* ignora */ }
+      }
 
       // 2) Busca a versão atual no Google por trás dos panos e atualiza quando chegar
       try {
@@ -160,9 +169,28 @@
       }
 
       try {
+        const setoresAtuais = await callApi('getSetores');
+        localStorage.setItem('setoresCache', JSON.stringify(setoresAtuais));
+        preencherSelectSetores(setoresAtuais);
+      } catch (err) { /* não crítico */ }
+
+      try {
         const nome = await callApi('getUltimoResponsavel');
         if (nome) document.getElementById('responsavel').value = nome;
       } catch (err) { /* não crítico */ }
+    }
+
+    function preencherSelectSetores(lista) {
+      const select = document.getElementById('setor');
+      const selecionadoAntes = select.value;
+      select.innerHTML = '<option value="">Selecione...</option>';
+      lista.forEach(function (s) {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = s;
+        select.appendChild(opt);
+      });
+      if (selecionadoAntes) select.value = selecionadoAntes;
     }
 
     let produtoSelecionado = '';
@@ -213,7 +241,10 @@
       document.getElementById('btn-entrada').classList.toggle('selecionado', tipo === 'Entrada');
       document.getElementById('btn-saida').classList.toggle('selecionado', tipo === 'Saída');
       document.getElementById('grupo-destinatario').style.display = (tipo === 'Saída') ? 'block' : 'none';
-      if (tipo !== 'Saída') document.getElementById('destinatario').value = '';
+      if (tipo !== 'Saída') {
+        document.getElementById('destinatario').value = '';
+        document.getElementById('setor').value = '';
+      }
     }
     document.getElementById('btn-entrada').addEventListener('click', function () { selecionarTipo('Entrada'); });
     document.getElementById('btn-saida').addEventListener('click', function () { selecionarTipo('Saída'); });
@@ -305,6 +336,7 @@
       const quantidade = document.getElementById('quantidade').value;
       const responsavel = document.getElementById('responsavel').value;
       const destinatario = document.getElementById('destinatario').value;
+      const setor = document.getElementById('setor').value;
       const observacao = document.getElementById('observacao').value;
 
       if (!produto) { mostrarStatus('erro', 'Escolha um produto da lista de sugestões.'); return; }
@@ -312,6 +344,7 @@
       if (!quantidade || Number(quantidade) <= 0) { mostrarStatus('erro', 'Informe a quantidade.'); return; }
       if (!responsavel) { mostrarStatus('erro', 'Informe o responsável.'); return; }
       if (tipoSelecionado === 'Saída' && !destinatario) { mostrarStatus('erro', 'Informe para quem o produto foi entregue.'); return; }
+      if (tipoSelecionado === 'Saída' && !setor) { mostrarStatus('erro', 'Escolha o setor que consumiu o produto.'); return; }
 
       this.disabled = true;
       mostrarStatus('ok', 'Enviando...');
@@ -324,6 +357,7 @@
           quantidade: quantidade,
           responsavel: responsavel,
           destinatario: destinatario,
+          setor: setor,
           observacao: observacao
         });
         mostrarStatus('ok', 'Registrado: ' + tipoSelecionado + ' de ' + quantidade + ' - ' + produto);
@@ -331,6 +365,7 @@
         produtoSelecionado = '';
         document.getElementById('quantidade').value = '';
         document.getElementById('destinatario').value = '';
+        document.getElementById('setor').value = '';
         document.getElementById('observacao').value = '';
         document.getElementById('produto-lido').style.display = 'none';
         callApi('salvarUltimoResponsavel', { nome: responsavel });
