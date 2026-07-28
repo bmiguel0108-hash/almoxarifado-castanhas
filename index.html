@@ -66,12 +66,25 @@
   .sugestao-item { padding: 10px 12px; cursor: pointer; font-size: 14px; border-bottom: 1px solid #EEE; }
   .sugestao-item:hover, .sugestao-item:active { background: #F1EFE8; }
   .sugestao-vazia { padding: 10px 12px; font-size: 13px; color: #5F5E5A; }
+  #lista-itens { margin-bottom: 4px; }
+  .item-linha {
+    display: flex; align-items: center; justify-content: space-between;
+    background: #F1EFE8; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: 14px;
+  }
+  .item-linha .item-remover { color: #D85A30; font-weight: bold; cursor: pointer; padding: 0 6px; }
+  #btn-add-item { background: #5F5E5A; color: #fff; }
 </style>
 </head>
 <body>
   <h1>Almoxarifado - lançamento rápido</h1>
 
   <div class="card">
+    <label>Tipo de movimentação</label>
+    <div class="tipo-group">
+      <div class="tipo-btn entrada" id="btn-entrada">Entrada</div>
+      <div class="tipo-btn saida" id="btn-saida">Saída</div>
+    </div>
+
     <button id="btn-scan" type="button">Escanear QR code</button>
     <div id="qr-reader"></div>
     <div id="produto-lido"></div>
@@ -82,7 +95,14 @@
       <div id="produto-sugestoes"></div>
     </div>
 
-    <div id="toggle-cadastro" style="color:#185FA5; font-size:13px; font-weight:bold; margin:-6px 0 14px; cursor:pointer;">+ Cadastrar novo produto</div>
+    <label for="quantidade">Quantidade</label>
+    <input type="number" id="quantidade" min="0" step="1" inputmode="numeric">
+
+    <button id="btn-add-item" type="button" style="background:#185FA5; color:#fff;">+ Adicionar à lista</button>
+
+    <div id="lista-itens"></div>
+
+    <div id="toggle-cadastro" style="color:#185FA5; font-size:13px; font-weight:bold; margin:0 0 14px; cursor:pointer;">+ Cadastrar novo produto</div>
 
     <div id="grupo-cadastro" class="card" style="display:none; padding:12px; margin-bottom:14px; background:#F7F6F1;">
       <label for="novo-codigo">Código (opcional)</label>
@@ -96,15 +116,6 @@
       <button type="button" id="btn-salvar-produto" style="background:#5F5E5A; color:#fff;">Salvar produto</button>
       <div id="status-cadastro" style="font-size:13px; text-align:center;"></div>
     </div>
-
-    <label>Tipo de movimentação</label>
-    <div class="tipo-group">
-      <div class="tipo-btn entrada" id="btn-entrada">Entrada</div>
-      <div class="tipo-btn saida" id="btn-saida">Saída</div>
-    </div>
-
-    <label for="quantidade">Quantidade</label>
-    <input type="number" id="quantidade" min="0" step="1" inputmode="numeric">
 
     <label for="responsavel">Responsável</label>
     <input type="text" id="responsavel" placeholder="Seu nome">
@@ -122,7 +133,7 @@
     <label for="observacao">Observação (opcional)</label>
     <input type="text" id="observacao">
 
-    <button id="btn-enviar" type="button">Registrar</button>
+    <button id="btn-enviar" type="button">Registrar tudo</button>
     <div id="status"></div>
   </div>
 
@@ -194,6 +205,44 @@
     }
 
     let produtoSelecionado = '';
+    let itensCarrinho = []; // { produto, quantidade }
+
+    function renderItensCarrinho() {
+      const cont = document.getElementById('lista-itens');
+      cont.innerHTML = '';
+      itensCarrinho.forEach(function (item, idx) {
+        const div = document.createElement('div');
+        div.className = 'item-linha';
+        const texto = document.createElement('span');
+        texto.textContent = item.produto + ' — ' + item.quantidade;
+        const remover = document.createElement('span');
+        remover.className = 'item-remover';
+        remover.textContent = '✕ remover';
+        remover.addEventListener('click', function () {
+          itensCarrinho.splice(idx, 1);
+          renderItensCarrinho();
+        });
+        div.appendChild(texto);
+        div.appendChild(remover);
+        cont.appendChild(div);
+      });
+    }
+
+    document.getElementById('btn-add-item').addEventListener('click', function () {
+      const quantidade = document.getElementById('quantidade').value;
+      if (!produtoSelecionado) { mostrarStatus('erro', 'Escolha um produto da lista de sugestões.'); return; }
+      if (!quantidade || Number(quantidade) <= 0) { mostrarStatus('erro', 'Informe a quantidade.'); return; }
+
+      itensCarrinho.push({ produto: produtoSelecionado, quantidade: Number(quantidade) });
+      renderItensCarrinho();
+
+      document.getElementById('produto-busca').value = '';
+      produtoSelecionado = '';
+      document.getElementById('quantidade').value = '';
+      document.getElementById('produto-lido').style.display = 'none';
+      document.getElementById('status').style.display = 'none';
+      document.getElementById('produto-busca').focus();
+    });
 
     function renderSugestoes(lista) {
       const cont = document.getElementById('produto-sugestoes');
@@ -295,6 +344,7 @@
         produtoSelecionado = produto.produto;
         aviso.style.display = 'block';
         aviso.textContent = 'Lido: ' + produto.produto;
+        document.getElementById('quantidade').focus();
       } else {
         aviso.style.display = 'block';
         aviso.textContent = 'Código "' + codigoLido + '" não encontrado na lista de produtos.';
@@ -332,42 +382,36 @@
     }
 
     document.getElementById('btn-enviar').addEventListener('click', async function () {
-      const produto = produtoSelecionado;
-      const quantidade = document.getElementById('quantidade').value;
       const responsavel = document.getElementById('responsavel').value;
       const destinatario = document.getElementById('destinatario').value;
       const setor = document.getElementById('setor').value;
       const observacao = document.getElementById('observacao').value;
 
-      if (!produto) { mostrarStatus('erro', 'Escolha um produto da lista de sugestões.'); return; }
+      if (!itensCarrinho.length) { mostrarStatus('erro', 'Adicione ao menos um produto à lista antes de registrar.'); return; }
       if (!tipoSelecionado) { mostrarStatus('erro', 'Escolha Entrada ou Saída.'); return; }
-      if (!quantidade || Number(quantidade) <= 0) { mostrarStatus('erro', 'Informe a quantidade.'); return; }
       if (!responsavel) { mostrarStatus('erro', 'Informe o responsável.'); return; }
       if (tipoSelecionado === 'Saída' && !destinatario) { mostrarStatus('erro', 'Informe para quem o produto foi entregue.'); return; }
       if (tipoSelecionado === 'Saída' && !setor) { mostrarStatus('erro', 'Escolha o setor que consumiu o produto.'); return; }
 
       this.disabled = true;
-      mostrarStatus('ok', 'Enviando...');
+      mostrarStatus('ok', 'Enviando ' + itensCarrinho.length + ' item(ns)...');
 
       try {
-        await callApi('registrarMovimentacao', {
+        await callApi('registrarMovimentacoesEmLote', {
           data: new Date().toISOString(),
-          produto: produto,
           tipo: tipoSelecionado,
-          quantidade: quantidade,
           responsavel: responsavel,
           destinatario: destinatario,
           setor: setor,
-          observacao: observacao
+          observacao: observacao,
+          itens: itensCarrinho
         });
-        mostrarStatus('ok', 'Registrado: ' + tipoSelecionado + ' de ' + quantidade + ' - ' + produto);
-        document.getElementById('produto-busca').value = '';
-        produtoSelecionado = '';
-        document.getElementById('quantidade').value = '';
+        mostrarStatus('ok', 'Registrado: ' + tipoSelecionado + ' de ' + itensCarrinho.length + ' produto(s).');
+        itensCarrinho = [];
+        renderItensCarrinho();
         document.getElementById('destinatario').value = '';
         document.getElementById('setor').value = '';
         document.getElementById('observacao').value = '';
-        document.getElementById('produto-lido').style.display = 'none';
         callApi('salvarUltimoResponsavel', { nome: responsavel });
       } catch (err) {
         mostrarStatus('erro', 'Erro: ' + err.message);
