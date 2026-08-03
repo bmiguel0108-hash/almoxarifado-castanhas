@@ -31,33 +31,60 @@
   #status { text-align: center; font-size: 14px; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; }
   #status.ok { background: #EAF3DE; color: #27500A; display: block; }
   #status.erro { background: #FCEBEB; color: #791F1F; display: block; }
+  .abas { display: flex; gap: 8px; margin-bottom: 14px; }
+  .aba { flex: 1; text-align: center; padding: 12px; border-radius: 8px; font-weight: bold; font-size: 14px; cursor: pointer; background: #fff; border: 2px solid #B4B2A9; color: #5F5E5A; }
+  .aba.ativa { background: #185FA5; border-color: #185FA5; color: #fff; }
+  .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+  .badge-pendente { background: #FFF3CD; color: #8A6D00; }
+  .badge-aprovado { background: #EAF3DE; color: #27500A; }
+  .badge-negado { background: #FCEBEB; color: #791F1F; }
+  .pedido-meta { font-size: 12px; color: #5F5E5A; margin-bottom: 6px; }
+  .motivo { font-size: 13px; color: #791F1F; margin-top: 6px; }
+  #vazio-meus { text-align: center; color: #5F5E5A; font-size: 14px; padding: 20px 0; display: none; }
 </style>
 </head>
 <body>
   <h1>Pedido de produtos - Almoxarifado</h1>
 
-  <div class="card">
-    <label for="solicitante">Seu nome</label>
-    <input type="text" id="solicitante" placeholder="Nome completo">
+  <div class="abas">
+    <div class="aba ativa" id="aba-fazer">Fazer Pedido</div>
+    <div class="aba" id="aba-meus">Meus Pedidos</div>
+  </div>
 
-    <label for="setor">Seu setor</label>
-    <select id="setor"><option value="">Selecione...</option></select>
+  <div id="secao-fazer">
+    <div class="card">
+      <label for="solicitante">Seu nome</label>
+      <input type="text" id="solicitante" placeholder="Nome completo">
 
-    <label for="produto-busca">Produto</label>
-    <div id="produto-busca-wrapper">
-      <input type="text" id="produto-busca" placeholder="Digite para buscar o produto..." autocomplete="off">
-      <div id="produto-sugestoes"></div>
+      <label for="setor">Seu setor</label>
+      <select id="setor"><option value="">Selecione...</option></select>
+
+      <label for="produto-busca">Produto</label>
+      <div id="produto-busca-wrapper">
+        <input type="text" id="produto-busca" placeholder="Digite para buscar o produto..." autocomplete="off">
+        <div id="produto-sugestoes"></div>
+      </div>
+
+      <label for="quantidade">Quantidade</label>
+      <input type="number" id="quantidade" min="0" step="1" inputmode="numeric">
+
+      <button id="btn-add-item" type="button">+ Adicionar à lista</button>
+
+      <div id="lista-itens"></div>
+
+      <button id="btn-enviar" type="button">Enviar pedido</button>
+      <div id="status"></div>
     </div>
+  </div>
 
-    <label for="quantidade">Quantidade</label>
-    <input type="number" id="quantidade" min="0" step="1" inputmode="numeric">
-
-    <button id="btn-add-item" type="button">+ Adicionar à lista</button>
-
-    <div id="lista-itens"></div>
-
-    <button id="btn-enviar" type="button">Enviar pedido</button>
-    <div id="status"></div>
+  <div id="secao-meus" style="display:none;">
+    <div class="card">
+      <label for="nome-busca">Digite seu nome (como usou no pedido)</label>
+      <input type="text" id="nome-busca" placeholder="Nome completo">
+      <button id="btn-buscar-meus" type="button" style="background:#185FA5; color:#fff;">Buscar meus pedidos</button>
+    </div>
+    <div id="lista-meus"></div>
+    <div id="vazio-meus">Nenhum pedido encontrado com esse nome.</div>
   </div>
 
   <script>
@@ -197,6 +224,73 @@
         renderItensCarrinho();
       } catch (err) {
         mostrarStatus('erro', 'Erro: ' + err.message);
+      }
+      this.disabled = false;
+    });
+
+    document.getElementById('aba-fazer').addEventListener('click', function () {
+      document.getElementById('aba-fazer').classList.add('ativa');
+      document.getElementById('aba-meus').classList.remove('ativa');
+      document.getElementById('secao-fazer').style.display = 'block';
+      document.getElementById('secao-meus').style.display = 'none';
+    });
+
+    document.getElementById('aba-meus').addEventListener('click', function () {
+      document.getElementById('aba-meus').classList.add('ativa');
+      document.getElementById('aba-fazer').classList.remove('ativa');
+      document.getElementById('secao-meus').style.display = 'block';
+      document.getElementById('secao-fazer').style.display = 'none';
+      const nomeJaDigitado = document.getElementById('solicitante').value.trim();
+      if (nomeJaDigitado && !document.getElementById('nome-busca').value) {
+        document.getElementById('nome-busca').value = nomeJaDigitado;
+      }
+    });
+
+    function formatarData(iso) {
+      const d = new Date(iso);
+      if (isNaN(d)) return '';
+      return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function badgeDoStatus(status) {
+      if (status === 'Aprovado') return '<span class="badge badge-aprovado">Aprovado</span>';
+      if (status === 'Negado') return '<span class="badge badge-negado">Negado</span>';
+      return '<span class="badge badge-pendente">Pendente</span>';
+    }
+
+    document.getElementById('btn-buscar-meus').addEventListener('click', async function () {
+      const nome = document.getElementById('nome-busca').value.trim();
+      const lista = document.getElementById('lista-meus');
+      const vazio = document.getElementById('vazio-meus');
+      vazio.style.display = 'none';
+      lista.innerHTML = '';
+
+      if (!nome) { alert('Digite seu nome pra buscar.'); return; }
+
+      this.disabled = true;
+      lista.innerHTML = '<div class="card">Buscando...</div>';
+
+      try {
+        const pedidos = await callApi('getPedidosPorSolicitante', { nome: nome });
+        lista.innerHTML = '';
+        if (!pedidos.length) {
+          vazio.style.display = 'block';
+        } else {
+          pedidos.forEach(function (p) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            let html = '<b style="display:block; font-size:15px; margin-bottom:2px;">' + p.produto + ' — ' + p.quantidade + '</b>' +
+              '<div class="pedido-meta">' + p.setor + ' · pedido em ' + formatarData(p.data) + '</div>' +
+              badgeDoStatus(p.status);
+            if (p.status === 'Negado' && p.motivo) {
+              html += '<div class="motivo">Motivo: ' + p.motivo + '</div>';
+            }
+            card.innerHTML = html;
+            lista.appendChild(card);
+          });
+        }
+      } catch (err) {
+        lista.innerHTML = '<div class="card">Erro: ' + err.message + '</div>';
       }
       this.disabled = false;
     });
