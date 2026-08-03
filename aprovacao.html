@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aprovação de pedidos - Almoxarifado</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; margin: 0; padding: 16px; background: #F1EFE8; color: #2C2C2A; }
+  h1 { font-size: 18px; margin: 0 0 16px; }
+  .card { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .pedido-info { font-size: 14px; margin-bottom: 10px; line-height: 1.5; }
+  .pedido-info b { display: block; font-size: 16px; margin-bottom: 2px; }
+  .pedido-meta { font-size: 12px; color: #5F5E5A; }
+  .botoes { display: flex; gap: 10px; }
+  .botoes button { flex: 1; padding: 12px; font-size: 15px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; }
+  .btn-ok { background: #3B6D11; color: #fff; }
+  .btn-nao { background: #D85A30; color: #fff; }
+  #status { text-align: center; font-size: 14px; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; }
+  #status.ok { background: #EAF3DE; color: #27500A; display: block; }
+  #status.erro { background: #FCEBEB; color: #791F1F; display: block; }
+  #vazio { text-align: center; color: #5F5E5A; font-size: 14px; padding: 30px 0; }
+  #btn-atualizar { width: 100%; padding: 12px; font-size: 14px; border: none; border-radius: 8px; background: #185FA5; color: #fff; margin-bottom: 14px; cursor: pointer; }
+</style>
+</head>
+<body>
+  <h1>Pedidos pendentes de aprovação</h1>
+  <button id="btn-atualizar" type="button">↻ Atualizar lista</button>
+  <div id="lista-pedidos"></div>
+  <div id="vazio" style="display:none;">Nenhum pedido pendente agora.</div>
+  <div id="status"></div>
+
+  <script>
+    const API_URL = 'https://script.google.com/macros/s/AKfycbyUzoP_1uugrMM1xRevzTKuTCV-a3Sacpa3jfMkip_Xgpqn8HQGbYWBP1WEzkUXTgMm/exec';
+
+    async function callApi(action, payload) {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: action, payload: payload })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return data.result;
+    }
+
+    function mostrarStatus(tipo, texto) {
+      const el = document.getElementById('status');
+      el.className = tipo;
+      el.textContent = texto;
+    }
+
+    function formatarData(iso) {
+      const d = new Date(iso);
+      if (isNaN(d)) return '';
+      return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function carregarPedidos() {
+      const cont = document.getElementById('lista-pedidos');
+      const vazio = document.getElementById('vazio');
+      cont.innerHTML = '<div class="card">Carregando...</div>';
+      vazio.style.display = 'none';
+
+      try {
+        const pedidos = await callApi('getPedidosPendentes');
+        cont.innerHTML = '';
+        if (!pedidos.length) {
+          vazio.style.display = 'block';
+          return;
+        }
+        pedidos.forEach(function (p) {
+          const card = document.createElement('div');
+          card.className = 'card';
+
+          const info = document.createElement('div');
+          info.className = 'pedido-info';
+          info.innerHTML = '<b>' + p.produto + ' — ' + p.quantidade + '</b>' +
+            '<div class="pedido-meta">' + p.solicitante + ' · ' + p.setor + ' · ' + formatarData(p.data) + '</div>';
+
+          const botoes = document.createElement('div');
+          botoes.className = 'botoes';
+
+          const btnOk = document.createElement('button');
+          btnOk.className = 'btn-ok';
+          btnOk.textContent = '✓ OK';
+          btnOk.addEventListener('click', function () { decidir(p.linha, 'aprovar', card); });
+
+          const btnNao = document.createElement('button');
+          btnNao.className = 'btn-nao';
+          btnNao.textContent = '✕ Não';
+          btnNao.addEventListener('click', function () { decidir(p.linha, 'negar', card); });
+
+          botoes.appendChild(btnOk);
+          botoes.appendChild(btnNao);
+          card.appendChild(info);
+          card.appendChild(botoes);
+          cont.appendChild(card);
+        });
+      } catch (err) {
+        mostrarStatus('erro', 'Erro ao carregar pedidos: ' + err.message);
+      }
+    }
+
+    async function decidir(linha, acao, card) {
+      card.style.opacity = '0.5';
+      try {
+        if (acao === 'aprovar') {
+          await callApi('aprovarPedido', { linha: linha, aprovadoPor: 'Almoxarife' });
+          mostrarStatus('ok', 'Pedido aprovado — saída já lançada no estoque.');
+        } else {
+          await callApi('negarPedido', { linha: linha });
+          mostrarStatus('ok', 'Pedido negado.');
+        }
+        card.remove();
+        const cont = document.getElementById('lista-pedidos');
+        if (!cont.children.length) document.getElementById('vazio').style.display = 'block';
+      } catch (err) {
+        card.style.opacity = '1';
+        mostrarStatus('erro', 'Erro: ' + err.message);
+      }
+    }
+
+    document.getElementById('btn-atualizar').addEventListener('click', carregarPedidos);
+    carregarPedidos();
+  </script>
+</body>
+</html>

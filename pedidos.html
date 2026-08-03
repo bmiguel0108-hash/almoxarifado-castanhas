@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pedido de produtos - Almoxarifado</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; margin: 0; padding: 16px; background: #F1EFE8; color: #2C2C2A; }
+  h1 { font-size: 18px; margin: 0 0 16px; }
+  .card { background: #fff; border-radius: 10px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  label { display: block; font-size: 13px; font-weight: bold; margin-bottom: 6px; color: #5F5E5A; }
+  input, select { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #B4B2A9; border-radius: 8px; margin-bottom: 14px; background: #fff; }
+  button { width: 100%; padding: 14px; font-size: 16px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; margin-bottom: 10px; }
+  #btn-add-item { background: #5F5E5A; color: #fff; }
+  #btn-enviar { background: #3B6D11; color: #fff; }
+  #produto-busca-wrapper { position: relative; }
+  #produto-sugestoes {
+    display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff;
+    border: 1px solid #B4B2A9; border-radius: 8px; max-height: 260px; overflow-y: auto;
+    z-index: 10; margin-top: -10px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  }
+  .sugestao-item { padding: 10px 12px; cursor: pointer; font-size: 14px; border-bottom: 1px solid #EEE; display: flex; justify-content: space-between; }
+  .sugestao-item:hover, .sugestao-item:active { background: #F1EFE8; }
+  .sugestao-item .disp { font-size: 12px; color: #5F5E5A; }
+  .sugestao-item .disp.zero { color: #791F1F; font-weight: bold; }
+  .sugestao-vazia { padding: 10px 12px; font-size: 13px; color: #5F5E5A; }
+  #lista-itens { margin-bottom: 4px; }
+  .item-linha { display: flex; align-items: center; justify-content: space-between; background: #F1EFE8; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: 14px; }
+  .item-linha .item-remover { color: #D85A30; font-weight: bold; cursor: pointer; padding: 0 6px; }
+  #status { text-align: center; font-size: 14px; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; }
+  #status.ok { background: #EAF3DE; color: #27500A; display: block; }
+  #status.erro { background: #FCEBEB; color: #791F1F; display: block; }
+</style>
+</head>
+<body>
+  <h1>Pedido de produtos - Almoxarifado</h1>
+
+  <div class="card">
+    <label for="solicitante">Seu nome</label>
+    <input type="text" id="solicitante" placeholder="Nome completo">
+
+    <label for="setor">Seu setor</label>
+    <select id="setor"><option value="">Selecione...</option></select>
+
+    <label for="produto-busca">Produto</label>
+    <div id="produto-busca-wrapper">
+      <input type="text" id="produto-busca" placeholder="Digite para buscar o produto..." autocomplete="off">
+      <div id="produto-sugestoes"></div>
+    </div>
+
+    <label for="quantidade">Quantidade</label>
+    <input type="number" id="quantidade" min="0" step="1" inputmode="numeric">
+
+    <button id="btn-add-item" type="button">+ Adicionar à lista</button>
+
+    <div id="lista-itens"></div>
+
+    <button id="btn-enviar" type="button">Enviar pedido</button>
+    <div id="status"></div>
+  </div>
+
+  <script>
+    const API_URL = 'https://script.google.com/macros/s/AKfycbyUzoP_1uugrMM1xRevzTKuTCV-a3Sacpa3jfMkip_Xgpqn8HQGbYWBP1WEzkUXTgMm/exec';
+
+    let estoque = [];
+    let produtoSelecionado = '';
+    let itensCarrinho = [];
+
+    async function callApi(action, payload) {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: action, payload: payload })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return data.result;
+    }
+
+    async function carregarDados() {
+      try {
+        estoque = await callApi('getEstoqueAtual');
+      } catch (err) {
+        mostrarStatus('erro', 'Não foi possível carregar o estoque: ' + err.message);
+      }
+      try {
+        const setores = await callApi('getSetores');
+        const select = document.getElementById('setor');
+        setores.forEach(function (s) {
+          const opt = document.createElement('option');
+          opt.value = s; opt.textContent = s;
+          select.appendChild(opt);
+        });
+      } catch (err) { /* não crítico */ }
+    }
+
+    function renderSugestoes(lista) {
+      const cont = document.getElementById('produto-sugestoes');
+      if (!lista.length) {
+        cont.innerHTML = '<div class="sugestao-vazia">Nenhum produto encontrado</div>';
+        cont.style.display = 'block';
+        return;
+      }
+      cont.innerHTML = '';
+      lista.slice(0, 8).forEach(function (p) {
+        const div = document.createElement('div');
+        div.className = 'sugestao-item';
+        const nome = document.createElement('span');
+        nome.textContent = p.produto + ' (' + p.unidade + ')';
+        const disp = document.createElement('span');
+        disp.className = 'disp' + (Number(p.estoqueFinal) <= 0 ? ' zero' : '');
+        disp.textContent = 'disponível: ' + p.estoqueFinal;
+        div.appendChild(nome);
+        div.appendChild(disp);
+        div.addEventListener('click', function () {
+          document.getElementById('produto-busca').value = p.produto;
+          produtoSelecionado = p.produto;
+          cont.style.display = 'none';
+          document.getElementById('quantidade').focus();
+        });
+        cont.appendChild(div);
+      });
+      cont.style.display = 'block';
+    }
+
+    document.getElementById('produto-busca').addEventListener('input', function () {
+      const texto = this.value.trim().toLowerCase();
+      produtoSelecionado = '';
+      if (!texto) { document.getElementById('produto-sugestoes').style.display = 'none'; return; }
+      const filtrados = estoque.filter(function (p) { return p.produto.toLowerCase().includes(texto); });
+      renderSugestoes(filtrados);
+    });
+
+    document.getElementById('produto-busca').addEventListener('focus', function () {
+      if (this.value.trim() && !produtoSelecionado) this.dispatchEvent(new Event('input'));
+    });
+
+    document.addEventListener('click', function (e) {
+      const wrapper = document.getElementById('produto-busca-wrapper');
+      if (wrapper && !wrapper.contains(e.target)) {
+        document.getElementById('produto-sugestoes').style.display = 'none';
+      }
+    });
+
+    function renderItensCarrinho() {
+      const cont = document.getElementById('lista-itens');
+      cont.innerHTML = '';
+      itensCarrinho.forEach(function (item, idx) {
+        const div = document.createElement('div');
+        div.className = 'item-linha';
+        const texto = document.createElement('span');
+        texto.textContent = item.produto + ' — ' + item.quantidade;
+        const remover = document.createElement('span');
+        remover.className = 'item-remover';
+        remover.textContent = '✕ remover';
+        remover.addEventListener('click', function () { itensCarrinho.splice(idx, 1); renderItensCarrinho(); });
+        div.appendChild(texto); div.appendChild(remover);
+        cont.appendChild(div);
+      });
+    }
+
+    document.getElementById('btn-add-item').addEventListener('click', function () {
+      const quantidade = document.getElementById('quantidade').value;
+      if (!produtoSelecionado) { mostrarStatus('erro', 'Escolha um produto da lista de sugestões.'); return; }
+      if (!quantidade || Number(quantidade) <= 0) { mostrarStatus('erro', 'Informe a quantidade.'); return; }
+      itensCarrinho.push({ produto: produtoSelecionado, quantidade: Number(quantidade) });
+      renderItensCarrinho();
+      document.getElementById('produto-busca').value = '';
+      produtoSelecionado = '';
+      document.getElementById('quantidade').value = '';
+      document.getElementById('status').style.display = 'none';
+      document.getElementById('produto-busca').focus();
+    });
+
+    function mostrarStatus(tipo, texto) {
+      const el = document.getElementById('status');
+      el.className = tipo;
+      el.textContent = texto;
+    }
+
+    document.getElementById('btn-enviar').addEventListener('click', async function () {
+      const solicitante = document.getElementById('solicitante').value;
+      const setor = document.getElementById('setor').value;
+
+      if (!solicitante) { mostrarStatus('erro', 'Informe seu nome.'); return; }
+      if (!setor) { mostrarStatus('erro', 'Escolha seu setor.'); return; }
+      if (!itensCarrinho.length) { mostrarStatus('erro', 'Adicione ao menos um produto à lista.'); return; }
+
+      this.disabled = true;
+      mostrarStatus('ok', 'Enviando pedido...');
+
+      try {
+        await callApi('criarPedidosEmLote', { solicitante: solicitante, setor: setor, itens: itensCarrinho });
+        mostrarStatus('ok', 'Pedido enviado! Aguarde a aprovação do almoxarife.');
+        itensCarrinho = [];
+        renderItensCarrinho();
+      } catch (err) {
+        mostrarStatus('erro', 'Erro: ' + err.message);
+      }
+      this.disabled = false;
+    });
+
+    carregarDados();
+  </script>
+</body>
+</html>
